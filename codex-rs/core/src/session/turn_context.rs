@@ -140,6 +140,11 @@ impl TurnEnvironment {
         {
             return None;
         }
+        let effective_policy = self
+            .shell_snapshot_builder
+            .as_ref()
+            .map(|builder| builder.effective_policy(self.shell_environment_policy()))
+            .unwrap_or_else(|| self.shell_environment_policy().clone());
         if credential_broker_enabled {
             let sandbox = sandbox?;
             let use_login_shell = command[1] == "-lc";
@@ -162,7 +167,7 @@ impl TurnEnvironment {
                 .get(&key)
                 .filter(|snapshot| {
                     snapshot.path().as_path().is_file()
-                        && snapshot.is_brokered_for(self.shell_environment_policy())
+                        && snapshot.is_brokered_for(&effective_policy)
                 })
                 .cloned()
             {
@@ -183,7 +188,7 @@ impl TurnEnvironment {
                         Some(sandbox.clone()),
                     )
                     .await?;
-                if !snapshot.is_brokered_for(self.shell_environment_policy()) {
+                if !snapshot.is_brokered_for(&effective_policy) {
                     continue;
                 }
                 let mut snapshots = self.shell_snapshot_cache.lock().await;
@@ -195,9 +200,10 @@ impl TurnEnvironment {
             }
             None
         } else {
-            self.shell_snapshot.peek()?.clone().filter(|snapshot| {
-                &snapshot.shell_environment_policy == self.shell_environment_policy()
-            })
+            self.shell_snapshot
+                .peek()?
+                .clone()
+                .filter(|snapshot| snapshot.shell_environment_policy == effective_policy)
         }
     }
 

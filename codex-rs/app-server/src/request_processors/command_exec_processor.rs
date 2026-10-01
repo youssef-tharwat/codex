@@ -1,4 +1,5 @@
 use super::*;
+use codex_core::exec_env::TerminalEnvironment;
 use codex_core::exec_env::inject_apply_patch_env;
 use codex_core::windows_sandbox::local_binding_policy_for_sandbox;
 use codex_core::windows_sandbox::managed_proxy_routing_for_windows_sandbox;
@@ -11,6 +12,7 @@ pub(crate) struct CommandExecRequestProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     config_manager: ConfigManager,
     environment_manager: Arc<EnvironmentManager>,
+    terminal_environment: TerminalEnvironment,
     command_exec_manager: CommandExecManager,
 }
 
@@ -21,6 +23,7 @@ impl CommandExecRequestProcessor {
         outgoing: Arc<OutgoingMessageSender>,
         config_manager: ConfigManager,
         environment_manager: Arc<EnvironmentManager>,
+        terminal_environment: TerminalEnvironment,
     ) -> Self {
         Self {
             arg0_paths,
@@ -28,6 +31,7 @@ impl CommandExecRequestProcessor {
             outgoing,
             config_manager,
             environment_manager,
+            terminal_environment,
             command_exec_manager: CommandExecManager::default(),
         }
     }
@@ -167,6 +171,7 @@ impl CommandExecRequestProcessor {
                 }
             }
         }
+        self.terminal_environment.filter_environment(&mut env);
         env.retain(|name, _| !is_non_inheritable_env_var(name));
         inject_apply_patch_env(&mut env, &self.config.features);
         let timeout_ms = match timeout_ms {

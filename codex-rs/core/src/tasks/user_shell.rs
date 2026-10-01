@@ -165,8 +165,10 @@ pub(crate) async fn execute_user_shell_command(
         )
         .await;
     let shell_snapshot_location = shell_snapshot.as_ref().map(|snapshot| snapshot.path());
-    let shell_environment_policy = turn_environment.shell_environment_policy();
-    let mut exec_env_map = create_env(shell_environment_policy, Some(session.thread_id));
+    let shell_environment_policy = session
+        .terminal_environment
+        .shell_environment_policy(turn_environment.shell_environment_policy());
+    let mut exec_env_map = create_env(&shell_environment_policy, Some(session.thread_id));
     inject_session_env(&mut exec_env_map, session.session_id());
     inject_apply_patch_env(&mut exec_env_map, &turn_context.config.features);
     if exec_env_map.contains_key(PROXY_ACTIVE_ENV_KEY) {

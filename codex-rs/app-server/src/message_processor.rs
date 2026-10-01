@@ -308,6 +308,13 @@ impl MessageProcessor {
             }),
             ThreadStoreConfig::InMemory { .. } => None,
         };
+        // Only the embedded constructor owns this process's terminal. Source
+        // labels, persisted history and client configuration cannot grant it.
+        let terminal_environment = if matches!(rpc_transport, AppServerRpcTransport::InProcess) {
+            codex_core::exec_env::TerminalEnvironment::LocalProcess
+        } else {
+            codex_core::exec_env::TerminalEnvironment::Unavailable
+        };
         let environment_manager_for_requests = Arc::clone(&environment_manager);
         let environment_manager_for_extensions = Arc::clone(&environment_manager);
         let restriction_product = session_source.restriction_product();
@@ -369,6 +376,7 @@ impl MessageProcessor {
                     thread_state_manager.clone(),
                 )),
             );
+            let manager = manager.with_terminal_environment(terminal_environment);
             match code_mode_session_provider {
                 Some(provider) => manager.with_code_mode_session_provider(provider),
                 None => manager,
@@ -439,10 +447,12 @@ impl MessageProcessor {
             outgoing.clone(),
             config_manager.clone(),
             Arc::clone(&environment_manager_for_requests),
+            terminal_environment,
         );
         let process_exec_processor = ProcessExecRequestProcessor::new(
             outgoing.clone(),
             Arc::clone(&environment_manager_for_requests),
+            terminal_environment,
         );
         let feedback_processor = FeedbackRequestProcessor::new(
             auth_manager.clone(),

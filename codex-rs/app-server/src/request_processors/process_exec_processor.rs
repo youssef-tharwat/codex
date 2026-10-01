@@ -1,3 +1,4 @@
+use codex_core::exec_env::TerminalEnvironment;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
@@ -51,6 +52,7 @@ const OUTPUT_CHUNK_SIZE_HINT: usize = 64 * 1024;
 pub(crate) struct ProcessExecRequestProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     environment_manager: Arc<EnvironmentManager>,
+    terminal_environment: TerminalEnvironment,
     process_exec_manager: ProcessExecManager,
 }
 
@@ -58,10 +60,12 @@ impl ProcessExecRequestProcessor {
     pub(crate) fn new(
         outgoing: Arc<OutgoingMessageSender>,
         environment_manager: Arc<EnvironmentManager>,
+        terminal_environment: TerminalEnvironment,
     ) -> Self {
         Self {
             outgoing,
             environment_manager,
+            terminal_environment,
             process_exec_manager: ProcessExecManager::default(),
         }
     }
@@ -108,6 +112,7 @@ impl ProcessExecRequestProcessor {
                 }
             }
         }
+        self.terminal_environment.filter_environment(&mut env);
         env.retain(|name, _| !is_non_inheritable_env_var(name));
         let expiration = match timeout_ms {
             Some(Some(timeout_ms)) => match u64::try_from(timeout_ms) {

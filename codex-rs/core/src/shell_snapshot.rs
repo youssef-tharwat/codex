@@ -48,6 +48,7 @@ pub(crate) use sandbox::snapshot_read_permissions;
 
 #[derive(Clone)]
 pub(crate) struct ShellSnapshot {
+    terminal_environment: crate::exec_env::TerminalEnvironment,
     config: Option<Arc<ShellSnapshotConfig>>,
     credential_broker: Option<watch::Sender<SnapshotCredentialBrokerState>>,
 }
@@ -114,8 +115,10 @@ impl ShellSnapshot {
         state_db: Option<StateDbHandle>,
         credential_broker: Option<watch::Sender<SnapshotCredentialBrokerState>>,
         prefer_executor_snapshots: bool,
+        terminal_environment: crate::exec_env::TerminalEnvironment,
     ) -> Self {
         Self {
+            terminal_environment,
             config: Some(Arc::new(ShellSnapshotConfig {
                 codex_home,
                 session_id,
@@ -130,9 +133,17 @@ impl ShellSnapshot {
 
     pub(crate) fn disabled() -> Self {
         Self {
+            terminal_environment: crate::exec_env::TerminalEnvironment::LocalProcess,
             config: None,
             credential_broker: None,
         }
+    }
+
+    pub(crate) fn effective_policy(
+        &self,
+        policy: &ShellEnvironmentPolicy,
+    ) -> ShellEnvironmentPolicy {
+        self.terminal_environment.shell_environment_policy(policy)
     }
 
     pub(crate) fn set_credential_broker(&self, state: SnapshotCredentialBrokerState) -> bool {
@@ -158,6 +169,7 @@ impl ShellSnapshot {
         sandbox: Option<ShellSnapshotSandbox>,
     ) -> Option<Arc<ShellSnapshotFile>> {
         let config = Arc::clone(self.config.as_ref()?);
+        let shell_environment_policy = self.effective_policy(&shell_environment_policy);
         if environment.is_remote() {
             return None;
         }
@@ -308,6 +320,7 @@ impl ShellSnapshot {
             shell,
             &temp_path,
             session_cwd,
+            shell_environment_policy,
             credential_broker.as_ref(),
             sandbox,
         )
@@ -608,6 +621,7 @@ async fn capture_snapshot(
         SNAPSHOT_TIMEOUT,
         shell_mode,
         cwd,
+        shell_environment_policy,
         credential_broker,
         sandbox,
     )
@@ -1003,6 +1017,7 @@ async fn validate_snapshot(
     shell: &Shell,
     snapshot_path: &AbsolutePathBuf,
     cwd: &AbsolutePathBuf,
+    shell_environment_policy: &ShellEnvironmentPolicy,
     credential_broker: Option<&SnapshotCredentialBroker>,
     sandbox: Option<&ShellSnapshotSandbox>,
 ) -> Result<()> {
@@ -1014,6 +1029,7 @@ async fn validate_snapshot(
         SNAPSHOT_TIMEOUT,
         SnapshotShellMode::Validation(snapshot_path),
         cwd,
+        shell_environment_policy,
         credential_broker,
         sandbox,
     )
@@ -1027,6 +1043,7 @@ async fn run_script_with_timeout(
     snapshot_timeout: Duration,
     shell_mode: SnapshotShellMode<'_>,
     cwd: &AbsolutePathBuf,
+    shell_environment_policy: &ShellEnvironmentPolicy,
     credential_broker: Option<&SnapshotCredentialBroker>,
     sandbox: Option<&ShellSnapshotSandbox>,
 ) -> Result<String> {
@@ -1037,7 +1054,11 @@ async fn run_script_with_timeout(
         args[1] = "-fc".to_string();
     }
     let shell_name = shell.name();
-    let mut prepared_env = None;
+    let mut prepared_env = Some(create_env_from_vars(
+        std::env::vars(),
+        shell_environment_policy,
+        /*thread_id*/ None,
+    ));
     if let Some(credential_broker) = credential_broker {
         let policy = &credential_broker.shell_environment_policy;
         let mut env = create_env_from_vars(std::env::vars(), policy, /*thread_id*/ None);

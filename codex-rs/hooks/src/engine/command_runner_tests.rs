@@ -430,6 +430,7 @@ async fn build_command_replays_snapshot_before_hook_overrides_and_scrubbing() {
         command_line,
         &environment,
         &env,
+        &[],
     );
     #[cfg(not(unix))]
     let mut command = command;
@@ -948,5 +949,46 @@ async fn hook_rejects_nul_in_configured_and_default_shell_program() {
         );
         assert_eq!(result.exit_code, None);
         assert!(!root.path().join("ran").exists());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn terminal_exclusions_survive_hook_override_and_reload() {
+    let root = tempdir().expect("hook directory");
+    let keys = [
+        "HERDR_ENV",
+        "HERDR_PANE_ID",
+        "HERDR_TAB_ID",
+        "HERDR_WORKSPACE_ID",
+        "HERDR_SOCKET_PATH",
+    ];
+    let mut environment = vec![(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))];
+    environment.extend(keys.map(|key| (OsString::from(key), OsString::from("daemon"))));
+    let env = keys
+        .map(|key| (key.to_owned(), "configured-override".to_owned()))
+        .into();
+    let (result_sender, _receiver) = async_channel::unbounded();
+    let runtime = CommandHookRuntime::new_with_environment_exclusions(
+        CommandShell {
+            program: "/bin/sh".to_owned(),
+            args: vec!["-c".to_owned()],
+        },
+        Arc::new(environment),
+        ThreadId::new(),
+        result_sender,
+        keys.map(str::to_owned).to_vec(),
+    );
+    let handler = write_handler(&root, "");
+    let command = r#"printf '%s\n' "${HERDR_ENV-unset}" "${HERDR_PANE_ID-unset}" "${HERDR_TAB_ID-unset}" "${HERDR_WORKSPACE_ID-unset}" "${HERDR_SOCKET_PATH-unset}""#;
+    let refreshed = runtime.reconfigured(CommandShell {
+        program: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned()],
+    });
+    for runtime in [&runtime, &refreshed] {
+        let result = run_command(runtime, &handler, command, &env, "{}", root.path()).await;
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(result.stdout, "unset\n".repeat(5));
+        assert_eq!(result.error, None);
     }
 }

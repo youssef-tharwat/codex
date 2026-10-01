@@ -57,6 +57,7 @@ type McpToolApprovalMetadataMap =
 ///
 /// A session has at most 1 running task at a time, and can be interrupted by user input.
 pub(crate) struct Session {
+    pub(crate) terminal_environment: crate::exec_env::TerminalEnvironment,
     pub(crate) thread_id: ThreadId,
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
@@ -738,6 +739,7 @@ impl Session {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new(
         startup: Option<Arc<super::startup::SessionStartup>>,
+        terminal_environment: crate::exec_env::TerminalEnvironment,
         mut session_configuration: SessionConfiguration,
         environment_selections: &[TurnEnvironmentSelection],
         config: Arc<Config>,
@@ -1423,6 +1425,7 @@ impl Session {
                     state_db_ctx.clone(),
                     snapshot_credential_broker,
                     prefer_executor_shell_snapshots,
+                    terminal_environment,
                 )
             } else {
                 ShellSnapshot::disabled()
@@ -1580,13 +1583,15 @@ impl Session {
                 &session_configuration.disabled_plugin_ids,
             )
             .await;
-            let (hooks, async_hook_results) = Hooks::new(
+            let (hooks, async_hook_results) = Hooks::new_with_environment(
                 hooks_config,
                 thread_id,
                 Arc::new(CoreHookMcpExecutor {
                     runtime: Arc::clone(&mcp_runtime),
                     thread_id,
                 }),
+                std::env::vars_os().collect(),
+                terminal_environment.excluded_environment_keys(),
             )?;
             for warning in hooks.startup_warnings() {
                 post_session_configured_events.push(Event {
@@ -1764,6 +1769,7 @@ impl Session {
             };
             let (mcp_prewarm_tx, mcp_prewarm_rx) = async_channel::bounded(1);
             let sess = Arc::new(Session {
+                terminal_environment,
                 thread_id,
                 installation_id,
                 tx_event: tx_event.clone(),

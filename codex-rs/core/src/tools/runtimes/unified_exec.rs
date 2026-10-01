@@ -350,8 +350,12 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
             && (managed_network.is_some() || base_command.get(1).is_some_and(|flag| flag == "-lc"))
         {
             Some(
-                snapshot
-                    .restore_credentials(&mut env, req.turn_environment.shell_environment_policy()),
+                snapshot.restore_credentials(
+                    &mut env,
+                    &ctx.session
+                        .terminal_environment
+                        .shell_environment_policy(req.turn_environment.shell_environment_policy()),
+                ),
             )
         } else {
             None
