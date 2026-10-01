@@ -1301,6 +1301,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
     thread_extension_init.insert(codex_extension_api::SessionIsolation::Isolated);
     let (session, io) = Session::spawn(SessionSpawnArgs {
         startup: None,
+        terminal_environment: crate::exec_env::TerminalEnvironment::LocalProcess,
         config,
         allow_provider_model_fallback: false,
         instructions: Default::default(),

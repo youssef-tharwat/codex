@@ -3,7 +3,6 @@ use codex_features::Feature;
 use codex_features::Features;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
-#[cfg(test)]
 use codex_protocol::config_types::EnvironmentVariablePattern;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::models::ActivePermissionProfile;
@@ -14,6 +13,62 @@ pub use codex_protocol::shell_environment::CODEX_SESSION_ID_ENV_VAR;
 pub use codex_protocol::shell_environment::CODEX_THREAD_ID_ENV_VAR;
 
 pub(crate) const CODEX_VERSION_ENV_VAR: &str = "CODEX_VERSION";
+
+pub(crate) const TERMINAL_ENV_KEYS: [&str; 5] = [
+    "HERDR_ENV",
+    "HERDR_PANE_ID",
+    "HERDR_TAB_ID",
+    "HERDR_WORKSPACE_ID",
+    "HERDR_SOCKET_PATH",
+];
+
+/// Whether the runtime owns the process whose terminal environment it inherits.
+/// This is construction-time state, never a client assertion or persisted setting.
+/// `LocalProcess` preserves direct and embedded callers; it is not peer attestation.
+#[derive(Clone, Copy, Debug)]
+pub enum TerminalEnvironment {
+    LocalProcess,
+    /// External clients have no verified attachment to the server's terminal.
+    Unavailable,
+}
+
+pub(crate) fn is_terminal_env_key(name: &str) -> bool {
+    TERMINAL_ENV_KEYS
+        .iter()
+        .any(|key| key.eq_ignore_ascii_case(name))
+}
+
+impl TerminalEnvironment {
+    /// Apply the constructor-owned terminal boundary after every caller overlay.
+    /// This does not alter native Codex IDs or grant additional permissions.
+    pub fn filter_environment(self, env: &mut HashMap<String, String>) {
+        if matches!(self, Self::Unavailable) {
+            env.retain(|key, _| !is_terminal_env_key(key));
+        }
+    }
+
+    pub(crate) fn shell_environment_policy(
+        self,
+        policy: &ShellEnvironmentPolicy,
+    ) -> ShellEnvironmentPolicy {
+        let mut policy = policy.clone();
+        if matches!(self, Self::Unavailable) {
+            policy
+                .exclude
+                .extend(TERMINAL_ENV_KEYS.map(EnvironmentVariablePattern::new_case_insensitive));
+            // User configuration cannot assert a runtime terminal attachment.
+            policy.r#set.retain(|key, _| !is_terminal_env_key(key));
+        }
+        policy
+    }
+
+    pub(crate) fn excluded_environment_keys(self) -> Vec<String> {
+        match self {
+            Self::LocalProcess => Vec::new(),
+            Self::Unavailable => TERMINAL_ENV_KEYS.map(str::to_owned).to_vec(),
+        }
+    }
+}
 
 /// Informational name of the active permission profile. Child processes can
 /// overwrite this value, so it must not be treated as proof of enforcement.

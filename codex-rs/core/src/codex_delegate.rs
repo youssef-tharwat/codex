@@ -85,6 +85,7 @@ pub(crate) async fn run_codex_thread_interactive(
     thread_extension_init.insert(isolation);
     let (session, io) = Session::spawn(SessionSpawnArgs {
         startup: None,
+        terminal_environment: parent_session.terminal_environment,
         config,
         allow_provider_model_fallback: false,
         instructions,

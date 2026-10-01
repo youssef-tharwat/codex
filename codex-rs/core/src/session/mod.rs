@@ -431,6 +431,7 @@ pub(crate) enum ForkPersistence {
 }
 
 pub(crate) struct SessionSpawnArgs {
+    pub(crate) terminal_environment: crate::exec_env::TerminalEnvironment,
     pub(crate) startup: Option<Arc<startup::SessionStartup>>,
     pub(crate) config: Config,
     pub(crate) allow_provider_model_fallback: bool,
@@ -539,6 +540,7 @@ impl Session {
     async fn spawn_internal(args: SessionSpawnArgs) -> CodexResult<(Arc<Self>, SessionIo)> {
         let SessionSpawnArgs {
             startup,
+            terminal_environment,
             config,
             allow_provider_model_fallback,
             instructions,
@@ -869,6 +871,7 @@ impl Session {
 
         let session = Box::pin(Session::new(
             startup.clone(),
+            terminal_environment,
             session_configuration,
             &environment_selections,
             config.clone(),

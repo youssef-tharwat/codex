@@ -134,7 +134,9 @@ impl Session {
                     argv: shell.derive_exec_args("", /*use_login_shell*/ true),
                     cwd: environment.cwd().clone(),
                     env_policy: Some(exec_env_policy_from_shell_policy(
-                        environment.shell_environment_policy(),
+                        &session
+                            .terminal_environment
+                            .shell_environment_policy(environment.shell_environment_policy()),
                     )),
                     shell_snapshot: Some(ShellSnapshotRequest {
                         scope_id: format!(

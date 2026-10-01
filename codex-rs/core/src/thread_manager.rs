@@ -423,6 +423,7 @@ pub(crate) struct ThreadManagerState {
     attestation_provider: Option<Arc<dyn AttestationProvider>>,
     external_time_provider: Option<Arc<dyn TimeProvider>>,
     session_source: SessionSource,
+    terminal_environment: crate::exec_env::TerminalEnvironment,
     installation_id: String,
     analytics_events_client: Option<AnalyticsEventsClient>,
     // Captures submitted ops for testing purpose when test mode is enabled.
@@ -586,6 +587,7 @@ impl ThreadManager {
                 external_time_provider,
                 auth_manager,
                 session_source,
+                terminal_environment: crate::exec_env::TerminalEnvironment::LocalProcess,
                 installation_id,
                 analytics_events_client,
                 ops_log: should_use_test_thread_manager_behavior()
@@ -593,6 +595,19 @@ impl ThreadManager {
             }),
             _test_codex_home_guard: None,
         }
+    }
+
+    /// Select terminal inheritance before this manager can create or resume a thread.
+    /// Shared servers must not inherit the launcher's terminal attachment.
+    pub fn with_terminal_environment(
+        mut self,
+        terminal_environment: crate::exec_env::TerminalEnvironment,
+    ) -> Self {
+        let Some(state) = Arc::get_mut(&mut self.state) else {
+            unreachable!("terminal environment must be set before thread manager is shared");
+        };
+        state.terminal_environment = terminal_environment;
+        self
     }
 
     /// Generate every new thread identifier with the caller-provided factory.
@@ -761,6 +776,7 @@ impl ThreadManager {
                 external_time_provider: None,
                 auth_manager,
                 session_source: SessionSource::Exec,
+                terminal_environment: crate::exec_env::TerminalEnvironment::LocalProcess,
                 installation_id,
                 analytics_events_client: None,
                 ops_log: should_use_test_thread_manager_behavior()
@@ -2255,6 +2271,7 @@ impl ThreadManagerState {
             forked_from_thread_id.filter(|_| matches!(&initial_history, InitialHistory::Forked(_)));
         let (session, io) = Session::spawn(SessionSpawnArgs {
             startup,
+            terminal_environment: self.terminal_environment,
             config,
             allow_provider_model_fallback,
             instructions,

@@ -58,6 +58,7 @@ const MAX_CONCURRENT_ASYNC_HOOKS: usize = 8;
 pub(crate) struct CommandHookRuntime {
     shell: CommandShell,
     environment: Arc<Vec<(OsString, OsString)>>,
+    excluded_environment: Arc<[String]>,
     result_sender: Sender<HookCompletedEvent>,
     state: Arc<Mutex<CommandHookRuntimeState>>,
     output_spiller: HookOutputSpiller,
@@ -78,15 +79,33 @@ impl Default for CommandHookRuntimeState {
 }
 
 impl CommandHookRuntime {
+    #[cfg(test)]
     pub(crate) fn new(
         shell: CommandShell,
         environment: Arc<Vec<(OsString, OsString)>>,
         thread_id: ThreadId,
         result_sender: Sender<HookCompletedEvent>,
     ) -> Self {
+        Self::new_with_environment_exclusions(
+            shell,
+            environment,
+            thread_id,
+            result_sender,
+            Vec::new(),
+        )
+    }
+
+    pub(crate) fn new_with_environment_exclusions(
+        shell: CommandShell,
+        environment: Arc<Vec<(OsString, OsString)>>,
+        thread_id: ThreadId,
+        result_sender: Sender<HookCompletedEvent>,
+        excluded_environment: Vec<String>,
+    ) -> Self {
         Self {
             shell,
             environment,
+            excluded_environment: excluded_environment.into(),
             result_sender,
             state: Arc::new(Mutex::new(CommandHookRuntimeState::default())),
             output_spiller: HookOutputSpiller::new(thread_id),
@@ -103,6 +122,7 @@ impl CommandHookRuntime {
         Self {
             shell,
             environment: Arc::clone(&self.environment),
+            excluded_environment: Arc::clone(&self.excluded_environment),
             result_sender: self.result_sender.clone(),
             state: Arc::clone(&self.state),
             output_spiller: self.output_spiller.clone(),
@@ -222,7 +242,13 @@ pub(crate) async fn run_command(
     let started_at = chrono::Utc::now().timestamp();
     let started = Instant::now();
 
-    let mut command = build_command(&runtime.shell, command_line, &runtime.environment, env);
+    let mut command = build_command(
+        &runtime.shell,
+        command_line,
+        &runtime.environment,
+        env,
+        &runtime.excluded_environment,
+    );
     command.current_dir(cwd);
 
     #[cfg(windows)]
@@ -386,6 +412,7 @@ fn build_command(
     command_line: &str,
     environment: &[(OsString, OsString)],
     env: &HashMap<String, String>,
+    excluded_environment: &[String],
 ) -> Command {
     let mut command = if shell.program.is_empty() {
         Command::new(default_shell_program(environment))
@@ -431,7 +458,14 @@ fn build_command(
                 env.iter()
                     .map(|(key, value)| (OsStr::new(key), OsStr::new(value))),
             )
-            .filter(|(key, _)| !key.to_str().is_some_and(is_non_inheritable_env_var)),
+            .filter(|(key, _)| {
+                !key.to_str().is_some_and(|key| {
+                    is_non_inheritable_env_var(key)
+                        || excluded_environment
+                            .iter()
+                            .any(|excluded| excluded.eq_ignore_ascii_case(key))
+                })
+            }),
     );
     command
 }

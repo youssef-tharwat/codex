@@ -6350,6 +6350,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_packaged_zsh() {
     let environment_manager = Arc::new(EnvironmentManager::default_for_tests());
     let result = Session::new(
         /*startup*/ None,
+        crate::exec_env::TerminalEnvironment::LocalProcess,
         session_configuration,
         /*environment_selections*/ &[],
         Arc::clone(&config),
@@ -6708,6 +6709,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     };
 
     let session = Session {
+        terminal_environment: crate::exec_env::TerminalEnvironment::LocalProcess,
         thread_id,
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
@@ -6900,6 +6902,7 @@ async fn make_session_with_config_and_rx(
 
     let session = Session::new(
         /*startup*/ None,
+        crate::exec_env::TerminalEnvironment::LocalProcess,
         session_configuration,
         &default_environments,
         Arc::clone(&config),
@@ -7032,6 +7035,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
 
     let session = Session::new(
         /*startup*/ None,
+        crate::exec_env::TerminalEnvironment::LocalProcess,
         session_configuration,
         &default_environments,
         Arc::clone(&config),
@@ -8984,6 +8988,7 @@ where
     };
 
     let session = Arc::new(Session {
+        terminal_environment: crate::exec_env::TerminalEnvironment::LocalProcess,
         thread_id,
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,

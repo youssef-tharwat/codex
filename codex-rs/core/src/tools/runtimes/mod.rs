@@ -361,15 +361,65 @@ pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
             override_env.insert(key.to_string(), value.clone());
         }
     }
-    // Do not let a snapshot resurrect stale runtime state when it is inactive.
-    let (override_captures, override_exports) = build_override_exports(
-        &override_env,
-        &[
-            CODEX_PERMISSION_PROFILE_ENV_VAR,
-            CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS_ENV_VAR,
-            PLUGIN_METRICS_OUTPUT_ENV_VAR,
-        ],
+    // Terminal restoration is separate: enumerate every exported case variant,
+    // and stop before the user command if readonly state cannot be corrected.
+    override_env.retain(|key, _| !crate::exec_env::is_terminal_env_key(key));
+    let terminal_pattern = crate::exec_env::TERMINAL_ENV_KEYS
+        .iter()
+        .map(|key| {
+            key.chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphabetic() {
+                        format!("[{}{}]", ch.to_ascii_lowercase(), ch.to_ascii_uppercase())
+                    } else {
+                        ch.to_string()
+                    }
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    let mut terminal_values = env
+        .iter()
+        .filter(|(key, _)| crate::exec_env::is_terminal_env_key(key))
+        .collect::<Vec<_>>();
+    terminal_values.sort_unstable_by_key(|(key, _)| *key);
+    let allowed_keys = terminal_values
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect::<Vec<_>>()
+        .join("|");
+    let keep_allowed = if allowed_keys.is_empty() {
+        String::new()
+    } else {
+        format!("{allowed_keys}) ;;\n")
+    };
+    let terminal_restores = terminal_values.iter().map(|(key, value)| {
+        let value = shell_single_quote(value);
+        format!("if [ -z \"${{{key}+x}}\" ] || [ \"${{{key}-}}\" != '{value}' ]; then export {key}='{value}' || exit 1; fi")
+    }).collect::<Vec<_>>().join("\n");
+    let terminal_exports = format!(
+        r#"__CODEX_TERMINAL_EXPORTS="$(command env)" || exit 1
+while IFS='=' read -r __CODEX_TERMINAL_KEY __CODEX_TERMINAL_VALUE; do
+  case "$__CODEX_TERMINAL_KEY" in
+    {terminal_pattern})
+      case "$__CODEX_TERMINAL_KEY" in
+        {keep_allowed}*) unset "$__CODEX_TERMINAL_KEY" || exit 1 ;;
+      esac ;;
+  esac
+done <<__CODEX_TERMINAL_EXPORTS_END
+$__CODEX_TERMINAL_EXPORTS
+__CODEX_TERMINAL_EXPORTS_END
+{terminal_restores}
+unset __CODEX_TERMINAL_EXPORTS __CODEX_TERMINAL_KEY __CODEX_TERMINAL_VALUE || exit 1"#
     );
+    let unset_when_absent = vec![
+        CODEX_PERMISSION_PROFILE_ENV_VAR,
+        CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS_ENV_VAR,
+        PLUGIN_METRICS_OUTPUT_ENV_VAR,
+    ];
+    let (override_captures, override_exports) =
+        build_override_exports(&override_env, &unset_when_absent);
     let (proxy_captures, proxy_exports) = build_proxy_env_exports(env);
     let (env_captures, replayed_startup_capture, env_exports) = if brokered {
         let bash_env_key = SNAPSHOT_ORIGINAL_BASH_ENV_ENV_KEY;
@@ -496,6 +546,7 @@ unset __CODEX_SNAPSHOT_ORIGINAL_ENV_SET __CODEX_SNAPSHOT_ORIGINAL_ENV \
         env_exports,
         zsh_startup_exports,
         outer_brokered_credential_exports,
+        terminal_exports,
     ]);
     let run_original = if reuse_session_shell {
         original_script

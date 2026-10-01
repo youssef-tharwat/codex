@@ -58,8 +58,8 @@ pub struct HookListOutcome {
 
 #[derive(Clone)]
 pub struct Hooks {
-    // TODO: Once legacy `notify` is removed, capture this snapshot in `CommandHookRuntime::new`
-    // and remove the environment plumbing from `Hooks` and `from_config`.
+    // TODO: Once legacy `notify` is removed, remove this duplicate snapshot storage.
+    // Keep the host-supplied environment and immutable exclusions in the command runtime.
     environment: Arc<Vec<(OsString, OsString)>>,
     after_agent: Vec<Hook>,
     engine: ClaudeHooksEngine,
@@ -75,10 +75,44 @@ impl Hooks {
         thread_id: ThreadId,
         mcp_executor: Arc<dyn HookMcpExecutor>,
     ) -> anyhow::Result<(Self, Receiver<codex_protocol::protocol::HookCompletedEvent>)> {
+        Self::new_with_environment(
+            config,
+            thread_id,
+            mcp_executor,
+            std::env::vars_os().collect(),
+            Vec::new(),
+        )
+    }
+
+    /// Bind hooks to a host-selected environment, retained across configuration reloads.
+    pub fn new_with_environment(
+        config: HooksConfig,
+        thread_id: ThreadId,
+        mcp_executor: Arc<dyn HookMcpExecutor>,
+        environment: Vec<(OsString, OsString)>,
+        excluded_environment: Vec<String>,
+    ) -> anyhow::Result<(Self, Receiver<codex_protocol::protocol::HookCompletedEvent>)> {
         let (result_sender, result_receiver) = async_channel::unbounded();
-        let environment = Arc::new(std::env::vars_os().collect());
+        let environment = Arc::new(
+            environment
+                .into_iter()
+                .filter(|(key, _)| {
+                    !key.to_str().is_some_and(|key| {
+                        excluded_environment
+                            .iter()
+                            .any(|excluded| excluded.eq_ignore_ascii_case(key))
+                    })
+                })
+                .collect(),
+        );
         let hooks = Self::from_config(config, mcp_executor, Arc::clone(&environment), |shell| {
-            CommandHookRuntime::new(shell, environment, thread_id, result_sender)
+            CommandHookRuntime::new_with_environment_exclusions(
+                shell,
+                environment,
+                thread_id,
+                result_sender,
+                excluded_environment,
+            )
         });
         let required_load_errors = hooks.engine.required_load_errors();
         if !required_load_errors.is_empty() {
